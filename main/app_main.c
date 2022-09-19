@@ -36,7 +36,8 @@
 
 static const char *TAG = "MQTT_EXAMPLE";
 u8g2_t u8g2;
-char msg[64];
+char topic[64];
+char data[64];
 
 static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event) {
     esp_mqtt_client_handle_t client = event->client;
@@ -76,8 +77,25 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event) {
             ESP_LOGI(TAG, "MQTT_EVENT_DATA");
             printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
             printf("DATA=%.*s\r\n", event->data_len, event->data);
-            strncpy(msg, event->data, 63);
-            msg[event->data_len] = 0x00;
+
+            /*strncpy(topic, event->topic, 63);
+            topic[event->topic_len] = 0x00;
+
+            strncpy(data, event->data, 63);
+            data[event->data_len] = 0x00;
+            */
+
+            /*
+            event->topic[event->topic_len] = 0x00;
+            snprintf(topic, 64, "topic: %s", event->topic);
+
+            event->data[event->data_len] = 0x00;
+            snprintf(data, 64, "data : %s", event->data);
+            */
+
+            snprintf(topic, 64, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
+            snprintf(data, 64, "DATA=%.*s\r\n", event->data_len, event->data);
+
             break;
         case MQTT_EVENT_ERROR:
             ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -136,12 +154,13 @@ void printMessage(void *args) {
         u8g2_SetFont(&u8g2, u8g2_font_ncenB14_tr);
         u8g2_DrawStr(&u8g2, 6, 20, "Hello MQTT");
         u8g2_SetFont(&u8g2, u8g_font_6x12);
-        u8g2_DrawStr(&u8g2, 15, 35, msg);
+        u8g2_DrawStr(&u8g2, 6, 35, topic);
+        u8g2_DrawStr(&u8g2, 6, 45, data);
         u8g2_SendBuffer(&u8g2);
         xTaskResumeAll();
 
         vTaskDelay(250 / portTICK_PERIOD_MS);
-        //taskYIELD();
+        taskYIELD();
     }
 }
 
