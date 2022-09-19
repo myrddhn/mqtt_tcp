@@ -1,5 +1,7 @@
 ## Description
-Andi's edit stock sample.  Added GLCD support.  To be merged with SNMP, and support for DS18B20 to be added so that we can publish timestamps and temperature readings to consumer apps via Mosquitto.
+Andi's edit of the stock sample code (description below).  Added GLCD support.  To be merged with SNMP, and support for DS18B20 to be added so that we can publish timestamps and temperature readings to consumer apps via Mosquitto.
+
+Image of a message published by the GTK dotnet Core app (see repos).
 
 ![img](pics/pic.jpg)
 
