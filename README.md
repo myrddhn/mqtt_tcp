@@ -1,3 +1,9 @@
+## Description
+Andi's edit stock sample.  Added GLCD support.  To be merged with SNMP, and support for DS18B20 to be added so that we can publish timestamps and temperature readings to consumer apps via Mosquitto.
+
+![img](pics/pic.jpg)
+
+_______________________
 # ESP-MQTT sample application
 (See the README.md file in the upper level 'examples' directory for more information about examples.)
 
