@@ -148,6 +148,9 @@ static void mqtt_app_start(void) {
 
 void printMessage(void *args) {
     while (1) {
+        u8g2_Setup_sh1106_i2c_128x64_noname_f(&u8g2, U8G2_R0, u8g2_esp8266_i2c_byte_cb, u8g2_esp8266_gpio_and_delay_cb);
+        u8g2_SetI2CAddress(&u8g2, 0x78);
+
         u8g2_ClearBuffer(&u8g2);
         u8g2_DrawRFrame(&u8g2, 0, 0, 128, 64, 5);
         vTaskSuspendAll();
@@ -161,6 +164,7 @@ void printMessage(void *args) {
 
         vTaskDelay(250 / portTICK_PERIOD_MS);
         taskYIELD();
+        ESP_LOGI(TAG, "Free heap size: %d\n", esp_get_free_heap_size());
     }
 }
 
