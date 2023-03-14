@@ -33,22 +33,25 @@
 #include "driver/gpio.h"
 #include "u8g2.h"
 #include "u8g2_esp8266_hal.h"
-#include "ds18x20.h"
 #include "darwinistic.xbm"
+#include "bmp180.h"
+#include "i2cdev.h"
 
-#define GPIO_OUT_1      14
-#define GPIO_OUT_2      12
-#define GPIO_OUT_3      13
-#define GPIO_OUT_4      15
+// #define GPIO_VCC      14
+// #define GPIO_GND      12
+#define GPIO_SDA      12
+#define GPIO_SCL      14
 
 static const char *TAG = "MQTT_EXAMPLE";
 u8g2_t u8g2;
-static char buff[30];
+static char buff[64];
 char topic[64];
 char data[64];
 float t;
 esp_mqtt_client_handle_t client = NULL;
 int msg_id;
+static float temp;
+static uint32_t pressure;
 
 static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event) {
     client = event->client;
@@ -89,21 +92,6 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event) {
             printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
             printf("DATA=%.*s\r\n", event->data_len, event->data);
 
-            /*strncpy(topic, event->topic, 63);
-            topic[event->topic_len] = 0x00;
-
-            strncpy(data, event->data, 63);
-            data[event->data_len] = 0x00;
-            */
-
-            /*
-            event->topic[event->topic_len] = 0x00;
-            snprintf(topic, 64, "topic: %s", event->topic);
-
-            event->data[event->data_len] = 0x00;
-            snprintf(data, 64, "data : %s", event->data);
-            */
-
             snprintf(topic, 64, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
             snprintf(data, 64, "DATA=%.*s\r\n", event->data_len, event->data);
 
@@ -127,30 +115,6 @@ static void mqtt_app_start(void) {
     esp_mqtt_client_config_t mqtt_cfg = {
         .uri = CONFIG_BROKER_URL,
     };
-#if CONFIG_BROKER_URL_FROM_STDIN
-    char line[128];
-
-    if (strcmp(mqtt_cfg.uri, "FROM_STDIN") == 0) {
-        int count = 0;
-        printf("Please enter url of mqtt broker\n");
-        while (count < 128) {
-            int c = fgetc(stdin);
-            if (c == '\n') {
-                line[count] = '\0';
-                break;
-            } else if (c > 0 && c < 127) {
-                line[count] = c;
-                ++count;
-            }
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-        }
-        mqtt_cfg.uri = line;
-        printf("Broker url: %s\n", line);
-    } else {
-        ESP_LOGE(TAG, "Configuration mismatch: wrong broker url");
-        abort();
-    }
-#endif /* CONFIG_BROKER_URL_FROM_STDIN */
 
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
@@ -166,16 +130,9 @@ void printMessage(void *args) {
     while (1) {
         vTaskSuspendAll();
 
-        // u8g2_Setup_sh1106_i2c_128x64_noname_f(&u8g2, U8G2_R0, u8g2_esp8266_i2c_byte_cb, u8g2_esp8266_gpio_and_delay_cb);
-        // u8g2_SetI2CAddress(&u8g2, 0x78);
-
         u8g2_ClearBuffer(&u8g2);
-        //u8g2_DrawRFrame(&u8g2, 0, 0, 128, 64, 5);
-        // printf("Temperature: %.4f°C\r\n", t / 10);
-        u8g2_SetDrawColor(&u8g2, 1);
 
         u8g2_SetFont(&u8g2, u8g2_font_ncenB14_tf);
-        //u8g2_DrawStr(&u8g2, 20, 20, buff);
         u8g2_DrawUTF8(&u8g2, 15, 20, buff);
         u8g2_SetFont(&u8g2, u8g_font_6x12);
         u8g2_DrawStr(&u8g2, 6, 35, topic);
@@ -192,40 +149,79 @@ void printMessage(void *args) {
 }
 
 static void temperature_task(void *args) {
+    bmp180_dev_t dev;
+    gpio_num_t SDA = GPIO_NUM_12;
+    gpio_num_t SCL = GPIO_NUM_14;
     static float lastvalue = 0.00F;
-    while (1) {
-        ds18x20_measure(GPIO_OUT_2, DS18X20_ANY, true);
-        ds18x20_read_temperature(GPIO_OUT_2, DS18X20_ANY, &t);
-        snprintf(buff, 31, "%.4f°C", t / 10);
+    memset(&dev, 0, sizeof(bmp180_dev_t)); // Zero descriptor
 
+    bmp180_init_desc(&dev, 0, SDA, SCL);
+    bmp180_init(&dev);
+
+    while (1)
+    {
+        esp_err_t res = bmp180_measure(&dev, &temp, &pressure, BMP180_MODE_HIGH_RESOLUTION);
+        if (res != ESP_OK) {
+            printf("Could not measure: %d\n", res);
+        } else {
+            /* float is used in printf(). you need non-default configuration in
+             * sdkconfig for ESP8266, which is enabled by default for this
+             * example. see sdkconfig.defaults.esp8266
+             */
+            printf("Temperature: %.2f degrees Celsius; Pressure: %.2f mbar\n", temp, (double)pressure / 100.0F);
+            snprintf(buff, 63, "%.2f" "\xc2\xb0" "C", temp);
+            if (client != NULL) {
+                //if (lastvalue != temp) {
+                    msg_id = esp_mqtt_client_publish(client, "/home/temp/int", buff, 0, 0, 0);
+                    snprintf(buff, 63, "%.2f", temp);
+                    msg_id = esp_mqtt_client_publish(client, "/home/temp/int/raw", buff, 0, 0, 0);
+                    printf("PUBLISHED TEMPERATURE!!!\r\n");
+                    lastvalue = temp;
+                //}
+            }
+            snprintf(buff, 63, "%.2f", (double)pressure / 100.0F);
+            msg_id = esp_mqtt_client_publish(client, "/home/pressure/raw", buff, 0, 0, 0);
+            snprintf(buff, 63, "%lu", (unsigned long)time(NULL));
+            msg_id = esp_mqtt_client_publish(client, "/home/timestamp", buff, 0, 0, 0);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10 * 1000));
+    }
+
+    /*static float lastvalue = 0.00F;
+    while (1) {
+        snprintf(buff, 31, "%.4f°C", t / 10);
         if (client != NULL) {
             if (lastvalue != t) {
                 msg_id = esp_mqtt_client_publish(client, "/home/temp/int", buff, 0, 0, 0);
                 lastvalue = t;
             }
-            //client = NULL;
         }
         taskYIELD();
     }
+    */
 }
 
 void app_main(void) {
     u8g2_esp8266_hal_t hal = U8G2_ESP8266_HAL_DEFAULT;
+
 
     hal.scl = GPIO_NUM_4;
     hal.sda = GPIO_NUM_5;
 
     u8g2_esp8266_hal_init(hal);
     u8g2_Setup_sh1106_i2c_128x64_noname_f(&u8g2, U8G2_R0, u8g2_esp8266_i2c_byte_cb, u8g2_esp8266_gpio_and_delay_cb);
- 
-    u8g2_InitDisplay(&u8g2);
-    u8g2_SetPowerSave(&u8g2, 0);
-    u8g2_SetI2CAddress(&u8g2, 0x78);
 
-    u8x8_cad_StartTransfer(&u8g2.u8x8);
-    //u8x8_cad_SendCmd(&u8g2.u8x8, 0xa7);
-    u8x8_cad_EndTransfer(&u8g2.u8x8);
-    u8g2_SetContrast(&u8g2, 5);
+    // u8g2_InitDisplay(&u8g2);
+
+    i2cdev_init();
+
+    // u8g2_SetPowerSave(&u8g2, 0);
+    // u8g2_SetI2CAddress(&u8g2, 0x78);
+
+    // //u8x8_cad_StartTransfer(&u8g2.u8x8);
+    // //u8x8_cad_SendCmd(&u8g2.u8x8, 0xa7);
+    // //u8x8_cad_EndTransfer(&u8g2.u8x8);
+    // u8g2_SetContrast(&u8g2, 5);
 
     ESP_LOGI(TAG, "[APP] Startup..");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
@@ -251,26 +247,15 @@ void app_main(void) {
 
     mqtt_app_start();
 
-    gpio_config_t io_conf;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << GPIO_OUT_1) | (1ULL << GPIO_OUT_3);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT_OD;
-    io_conf.pin_bit_mask = (1ULL << GPIO_OUT_2);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
-
-    gpio_set_level(GPIO_OUT_1, 1);
-    gpio_set_level(GPIO_OUT_3, 0);
+    // io_conf.intr_type = GPIO_INTR_DISABLE;
+    // io_conf.mode = GPIO_MODE_OUTPUT_OD;
+    // io_conf.pin_bit_mask = (1ULL << GPIO_SCL) | (1ULL << GPIO_SDA);
+    // io_conf.pull_down_en = 0;
+    // io_conf.pull_up_en = 0;
+    // gpio_config(&io_conf);
 
     sprintf(topic, "TOPIC=no topic");
     sprintf(data, "DATA=no data");
-    xTaskCreate(printMessage, "Print Message", 2048, NULL, 3, NULL);
+    // xTaskCreate(printMessage, "Print Message", 2048, NULL, 3, NULL);
     xTaskCreate(temperature_task, "Temperature Task", 2048, NULL, 2, NULL);
 }
