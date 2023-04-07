@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "i2cdev.h": "c",
+        "bmp180.h": "c"
+    },
+    "cmake.configureOnOpen": false
+}
